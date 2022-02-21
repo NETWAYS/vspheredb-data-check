@@ -1,3 +1,6 @@
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/NETWAYS/vspheredb-data-check)
+![GitHub](https://img.shields.io/github/license/NETWAYS/vspheredb-data-check)
+
 # README
 
 `check_vspheredb_data` is a check plugin for checking performance data gathered by the [Icingaweb2 vSphereDB module](https://github.com/icinga/icingaweb2-module-vspheredb)
