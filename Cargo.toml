@@ -7,7 +7,7 @@ readme = "README.md"
 repository = "https://github.com/NETWAYS/check-vspheredb-data"
 homepage = "https://netways.de"
 license = "GPL-2.0-or-later"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -17,3 +17,4 @@ clap = { version = "3.0.14", features = [ "derive" ] }
 sqlx = { version = "0.5", features = [ "runtime-async-std-native-tls", "mysql" ] }
 async-std = { version = "1", features = [ "attributes" ] }
 icingaplugin-rs = { git = "https://github.com/NETWAYS/icingaplugin-rs", tag="v0.0.1"}
+futures-lite = { version = "1.12.0" }

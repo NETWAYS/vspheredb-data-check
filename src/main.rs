@@ -1,9 +1,10 @@
 use clap::{Args, Parser, Subcommand};
-use icingaplugin_rs::{check::{CheckResult, Metric, PerfData}, utils::evaluate};
+use icingaplugin_rs::{check::{CheckResult, Metric, PerfData, State}, utils::evaluate};
 use sqlx::{Connection, MySqlConnection, mysql::MySqlRow, Row};
 use std::convert::TryInto;
 use std::ops::Deref;
 use std::process::exit;
+use futures_lite::stream::StreamExt;
 
 /// A check plugin for retrieving performance data of vSphere hosts collected by Icingaweb2's vSphereDB modul.
 ///
@@ -123,6 +124,24 @@ enum Checks {
         #[clap(short, long)]
         critical: Option<u32>,
     },
+
+    /// Checks all datastores or a singular, specified datastore
+    Datastore {
+        #[clap(flatten)]
+        settings: Settings,
+
+        /// optional specific Datastore
+        #[clap(short, long)]
+        store: Option<String>,
+
+        /// warning threshold as integer (80%)
+        #[clap(short, long)]
+        warning: Option<u32>,
+
+        /// critical threshold as integer (90%)
+        #[clap(short, long)]
+        critical: Option<u32>,
+    },
 }
 
 impl Deref for Checks {
@@ -134,6 +153,7 @@ impl Deref for Checks {
             Checks::Temperature{settings, ..} => settings,
             Checks::Nic{settings, ..} => settings,
             Checks::Hba{settings, ..} => settings,
+            Checks::Datastore{settings, ..} => settings,
         }
     }
 }
@@ -194,97 +214,211 @@ impl Checks {
                 query.push_str("\";");
                 return query;
             },
+            Checks::Datastore{store, ..} => {
+                query.push_str("SELECT o.object_name, ds.maintenance_mode, ds.capacity, ds.free_space 
+                               FROM datastore ds 
+                               INNER JOIN vcenter vc 
+                               ON ds.vcenter_uuid = vc.instance_uuid 
+                               INNER JOIN object o 
+                               ON ds.uuid = o.uuid ");
+                if let Some(s) = store {
+                    query.push_str("WHERE o.object_name LIKE \"");
+                    query.push_str(s);
+                    query.push_str("\" AND ");
+                } else {
+                    query.push_str("WHERE ")
+                }
+                query.push_str("vc.name LIKE \"");
+                query.push_str(machine);
+                query.push_str("\";");
+                return query;
+            },
         }
     }
 
-    fn process_results(self, row: MySqlRow) -> Result<(), sqlx::Error> {
+    fn process_results(self, rows: Vec<MySqlRow>) -> Result<(), sqlx::Error> {
         let mut metrics: Vec<Metric> = Vec::new();
         let status_msg: String;
         let warn: u32;
         let crit: u32;
         match self {
             Checks::Cpu{warning, critical, ..} => {
-                warn = warning.unwrap_or(80);
-                crit = critical.unwrap_or(90);
-                let value0 = row.get::<u32, usize>(0);
-                let value1 = row.get::<u32, usize>(1);
-                let value2 = row.get::<u32, usize>(2);
-                let value: u32 = (value0 * 100 / (value1 * value2)).into();
-                metrics.push(Metric::new(String::from("usage"), value0.to_string()));
-                metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
-                             .warning(warn.to_string() + "%")
-                             .critical(crit.to_string() + "%"));
-                metrics.push(Metric::new(String::from("mhz"), value1.to_string()));
-                metrics.push(Metric::new(String::from("cores"), value2.to_string()));
+                if let Some(row) = rows.into_iter().nth(0) {
+                    warn = warning.unwrap_or(80);
+                    crit = critical.unwrap_or(90);
+                    let value0 = row.get::<u32, usize>(0);
+                    let value1 = row.get::<u32, usize>(1);
+                    let value2 = row.get::<u32, usize>(2);
+                    let value: u32 = (value0 * 100 / (value1 * value2)).into();
+                    metrics.push(Metric::new(String::from("usage"), value0.to_string()));
+                    metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
+                                .warning(warn.to_string() + "%")
+                                .critical(crit.to_string() + "%"));
+                    metrics.push(Metric::new(String::from("mhz"), value1.to_string()));
+                    metrics.push(Metric::new(String::from("cores"), value2.to_string()));
 
-                status_msg = format!("Total CPU usage is {}GHz ({}%)", value0 / 1024, value);
-                let check_result = evaluate(value, warn, crit);
-                exit(
-                    check_result.set_info(status_msg)
-                    .set_perf_data(PerfData::from_metrics(metrics))
-                    .promote())
+                    status_msg = format!("Total CPU usage is {}GHz ({}%)", value0 / 1024, value);
+                    let check_result = evaluate(value, warn, crit);
+                    exit(
+                        check_result.set_info(status_msg)
+                        .set_perf_data(PerfData::from_metrics(metrics))
+                        .promote())
+                } else {
+                    exit(
+                        CheckResult::from(3)
+                        .set_info(String::from("Query returned no results."))
+                        .promote())
+                }
             },
             Checks::Memory{warning, critical, ..} => {
-                warn = warning.unwrap_or(80); 
-                crit = critical.unwrap_or(90); 
-                let value0 = row.get::<u32, usize>(0);
-                let value1 = row.get::<u32, usize>(1);
-                let value: u32 = (value0 * 100 / value1).into();
-                metrics.push(Metric::new(String::from("usage"), value0.to_string() + "MB"));
-                metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
-                             .warning(warn.to_string() + "%")
-                             .critical(crit.to_string() + "%"));
-                metrics.push(Metric::new(String::from("capacity"), value1.to_string() + "MB"));
+                if let Some(row) = rows.into_iter().nth(0) {
+                    warn = warning.unwrap_or(80); 
+                    crit = critical.unwrap_or(90); 
+                    let value0 = row.get::<u32, usize>(0);
+                    let value1 = row.get::<u32, usize>(1);
+                    let value: u32 = (value0 * 100 / value1).into();
+                    metrics.push(Metric::new(String::from("usage"), value0.to_string() + "MB"));
+                    metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
+                                .warning(warn.to_string() + "%")
+                                .critical(crit.to_string() + "%"));
+                    metrics.push(Metric::new(String::from("capacity"), value1.to_string() + "MB"));
 
-                status_msg = format!("Total memory usage is {}GB ({}%)", value0 / 1024, value);
-                let check_result = evaluate(value, warn, crit);
-                exit(
-                    check_result.set_info(status_msg)
-                    .set_perf_data(PerfData::from_metrics(metrics))
-                    .promote())
+                    status_msg = format!("Total memory usage is {}GB ({}%)", value0 / 1024, value);
+                    let check_result = evaluate(value, warn, crit);
+                    exit(
+                        check_result.set_info(status_msg)
+                        .set_perf_data(PerfData::from_metrics(metrics))
+                        .promote())
+                } else {
+                    exit(
+                        CheckResult::from(3)
+                        .set_info(String::from("Query returned no results."))
+                        .promote())
+                }
             },
             Checks::Temperature{warning, critical, ..} => {
-                warn = warning.unwrap_or(50);
-                crit = critical.unwrap_or(60);
-                let value: u32 = (row.get::<i32, usize>(0) / 100).try_into().unwrap();
-                metrics.push(Metric::new(String::from("temp"), value.to_string() + "C")
-                             .warning(warn.to_string() + "C")
-                             .critical(crit.to_string() + "C"));
+                if let Some(row) = rows.into_iter().nth(0) {
+                    warn = warning.unwrap_or(50);
+                    crit = critical.unwrap_or(60);
+                    let value: u32 = (row.get::<i32, usize>(0) / 100).try_into().unwrap();
+                    metrics.push(Metric::new(String::from("temp"), value.to_string() + "C")
+                                 .warning(warn.to_string() + "C")
+                                 .critical(crit.to_string() + "C"));
 
-                status_msg = format!("Temperature is {}°C", value);
-                let check_result = evaluate(value, warn, crit);
-                exit(
-                    check_result.set_info(status_msg)
-                    .set_perf_data(PerfData::from_metrics(metrics))
-                    .promote())
+                    status_msg = format!("Temperature is {}°C", value);
+                    let check_result = evaluate(value, warn, crit);
+                    exit(
+                        check_result.set_info(status_msg)
+                        .set_perf_data(PerfData::from_metrics(metrics))
+                        .promote())
+                } else {
+                    exit(
+                        CheckResult::from(3)
+                        .set_info(String::from("Query returned no results."))
+                        .promote())
+                }
             },
             Checks::Nic{warning, critical, ..} => {
-                warn = warning.unwrap_or(1);
-                crit = critical.unwrap_or(0);
-                let value: u8 = row.get(0);
-                metrics.push(Metric::new(String::from("nics"), value.to_string())
-                             .warning(warn.to_string())
-                             .critical(crit.to_string()));
+                if let Some(row) = rows.into_iter().nth(0) {
+                    warn = warning.unwrap_or(1);
+                    crit = critical.unwrap_or(0);
+                    let value: u8 = row.get(0);
+                    metrics.push(Metric::new(String::from("nics"), value.to_string())
+                                .warning(warn.to_string())
+                                .critical(crit.to_string()));
 
-                let check_result = evaluate(value, warn, crit);
-                exit(
-                    check_result.set_info(format!("Number of NICs: {}", value.to_string()))
-                    .set_perf_data(PerfData::from_metrics(metrics))
-                    .promote())
+                    let check_result = evaluate(value, warn, crit);
+                    exit(
+                        check_result.set_info(format!("Number of NICs: {}", value.to_string()))
+                        .set_perf_data(PerfData::from_metrics(metrics))
+                        .promote())
+                } else {
+                    exit(
+                        CheckResult::from(3)
+                        .set_info(String::from("Query returned no results."))
+                        .promote())
+                }
             },
             Checks::Hba{warning, critical, ..} => {
-                warn = warning.unwrap_or(1);
-                crit = critical.unwrap_or(0);
-                let value: u8 = row.get(0);
-                metrics.push(Metric::new(String::from("hbas"), value.to_string())
-                             .warning(warn.to_string())
-                             .critical(crit.to_string()));
+                if let Some(row) = rows.into_iter().nth(0) {
+                    warn = warning.unwrap_or(1);
+                    crit = critical.unwrap_or(0);
+                    let value: u8 = row.get(0);
+                    metrics.push(Metric::new(String::from("hbas"), value.to_string())
+                                .warning(warn.to_string())
+                                .critical(crit.to_string()));
 
-                let check_result = evaluate(value, warn, crit);
-                exit(
-                    check_result.set_info(format!("Number of HBAs: {}", value.to_string()))
-                    .set_perf_data(PerfData::from_metrics(metrics))
-                    .promote())
+                    let check_result = evaluate(value, warn, crit);
+                    exit(
+                        check_result.set_info(format!("Number of HBAs: {}", value.to_string()))
+                        .set_perf_data(PerfData::from_metrics(metrics))
+                        .promote())
+                } else {
+                    exit(
+                        CheckResult::from(3)
+                        .set_info(String::from("Query returned no results."))
+                        .promote())
+                }
+            },
+            Checks::Datastore{store, warning, critical, ..} => {
+                warn = warning.unwrap_or(80);
+                crit = critical.unwrap_or(90);
+
+                if let Some(s) = store {
+                    if let Some(row) = rows.into_iter().nth(0) {
+                        let maintenance_mode: &str = row.get(1);
+                        println!("Maintenance");
+                        let capacity: u64 = row.get(2);
+                        println!("Capacity");
+                        let free: u64 = row.get(3);
+                        let used_percent: u32 = ((capacity - free) * 100 / capacity).try_into().unwrap();
+                        metrics.push(Metric::new(String::from("used"), used_percent.to_string())
+                                     .warning(warn.to_string())
+                                     .critical(crit.to_string()));
+                        metrics.push(Metric::new(String::from("maintenance_mode"), maintenance_mode.to_string()));
+
+                        let check_result = evaluate(used_percent, warn, crit);
+                        exit(
+                            check_result.set_info(format!("Used storage space for datastore {} (mode: {}): {}%", s, maintenance_mode, used_percent.to_string()))
+                            .set_perf_data(PerfData::from_metrics(metrics))
+                            .promote())
+                    } else {
+                        exit(
+                            CheckResult::from(3)
+                            .set_info(String::from("Query returned no results."))
+                            .promote())
+                    }
+                } else {
+                    let mut output_string = String::new();
+                    let mut check_result = CheckResult::from(0);
+                    for row in rows {
+                        let name: &str = row.get(0);
+                        let maintenance_mode: &str = row.get(1);
+                        let capacity: u64 = row.get(2);
+                        let free: u64 = row.get(3);
+                        let used_percent: u32 = ((capacity - free) * 100 / capacity).try_into().unwrap();
+                        metrics.push(Metric::new(format!("{}_used", name), used_percent.to_string())
+                            .warning(warn.to_string())
+                            .critical(crit.to_string()));
+                        metrics.push(Metric::new(format!("{}_maintenance_mode", name), maintenance_mode.to_string()));
+                        
+                        let new_check_result = evaluate(used_percent, warn, crit);
+                        match new_check_result.state() {
+                                State::OK => (),
+                                State::Unknown => (),
+                                _ => output_string.push_str(&format!("Datastore {} (mode: {}) uses {}% of storage space!\n", name, maintenance_mode, used_percent.to_string())),
+                        };
+                        
+                        if <i32>::from(new_check_result.state()) > <i32>::from(check_result.state()) {
+                            check_result = new_check_result;
+                        }
+                    }
+
+                    exit(
+                        check_result.set_info(output_string)
+                        .set_perf_data(PerfData::from_metrics(metrics))
+                        .promote())
+                }
             },
         }
     }
@@ -309,15 +443,21 @@ async fn main() -> Result<(), sqlx::Error> {
     match MySqlConnection::connect(&address).await {
         Ok(c) => {
             conn = c;
-            let result = sqlx::query(&query).fetch_one(&mut conn).await;
-            if let Ok(r) = result {
+            let mut query_result = sqlx::query(&query).fetch(&mut conn);
+            let mut result_collection = Vec::new();  
+            while let Some(row) = query_result.try_next().await? {
+                result_collection.push(row);
+            }
+
+            args.check.process_results(result_collection)?;
+/*            if let Ok(r) = result {
                     args.check.process_results(r)?;
             } else {
                 exit(
                     CheckResult::from(1)
                     .set_info(format!("Query returned no results"))
                     .promote());
-            }
+            }*/
         },
         Err(e) => 
             exit(
