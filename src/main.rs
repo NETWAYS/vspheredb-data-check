@@ -123,6 +123,14 @@ enum Checks {
         #[clap(short, long)]
         critical: Option<u32>,
     },
+    Datastore {
+        #[clap(flatten)]
+        settings: Settings,
+
+        /// optional specific Datastore
+        #[clap(short, long)]
+        store: Option<String>,
+    },
 }
 
 impl Deref for Checks {
@@ -134,6 +142,7 @@ impl Deref for Checks {
             Checks::Temperature{settings, ..} => settings,
             Checks::Nic{settings, ..} => settings,
             Checks::Hba{settings, ..} => settings,
+            Checks::Datastore{settings, ..} => settings,
         }
     }
 }
@@ -190,6 +199,25 @@ impl Checks {
                 query.push_str("SELECT hardware_num_hba 
                                FROM host_system 
                                WHERE host_system.host_name LIKE \"");
+                query.push_str(machine);
+                query.push_str("\";");
+                return query;
+            },
+            Checks::Datastore{store, ..} => {
+                query.push_str("SELECT o.object_name, ds.maintenance_mode, ds.is_accessible, ds.capacity, ds.free_space 
+                               FROM datastore ds 
+                               INNER JOIN vcenter vc 
+                               ON ds.vcenter_uuid = vc.instance_uuid ");
+                if let Some(s) = store {
+                    query.push_str("INNER JOIN object o 
+                                   ON ds.uuid = o.uuid 
+                                   WHERE o.object_name LIKE \"");
+                    query.push_str(s);
+                    query.push_str("\" AND ");
+                } else {
+                    query.push_str("WHERE ")
+                }
+                query.push_str("vc.name LIKE \"");
                 query.push_str(machine);
                 query.push_str("\";");
                 return query;
@@ -286,6 +314,7 @@ impl Checks {
                     .set_perf_data(PerfData::from_metrics(metrics))
                     .promote())
             },
+            Checks::Datastore{store, ..} => Ok(()),
         }
     }
 }
