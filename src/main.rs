@@ -246,23 +246,29 @@ impl Checks {
                 if let Some(row) = rows.into_iter().nth(0) {
                     warn = warning.unwrap_or(80);
                     crit = critical.unwrap_or(90);
-                    let value0 = row.get::<u32, usize>(0);
-                    let value1 = row.get::<u32, usize>(1);
-                    let value2 = row.get::<u32, usize>(2);
-                    let value: u32 = (value0 * 100 / (value1 * value2)).into();
-                    metrics.push(Metric::new(String::from("usage"), value0.to_string()));
-                    metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
-                                .warning(warn.to_string() + "%")
-                                .critical(crit.to_string() + "%"));
-                    metrics.push(Metric::new(String::from("mhz"), value1.to_string()));
-                    metrics.push(Metric::new(String::from("cores"), value2.to_string()));
+                    if let Ok(value0) = row.try_get::<u32, usize>(0) {
+                        let value1 = row.get::<u32, usize>(1);
+                        let value2 = row.get::<u32, usize>(2);
+                        let value: u32 = (value0 * 100 / (value1 * value2)).into();
+                        metrics.push(Metric::new(String::from("usage"), value0.to_string()));
+                        metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
+                                    .warning(warn.to_string() + "%")
+                                    .critical(crit.to_string() + "%"));
+                        metrics.push(Metric::new(String::from("mhz"), value1.to_string()));
+                        metrics.push(Metric::new(String::from("cores"), value2.to_string()));
 
-                    status_msg = format!("Total CPU usage is {}GHz ({}%)", value0 / 1024, value);
-                    let check_result = evaluate(value, warn, crit);
-                    exit(
-                        check_result.set_info(status_msg)
-                        .set_perf_data(PerfData::from_metrics(metrics))
-                        .promote())
+                        status_msg = format!("Total CPU usage is {}GHz ({}%)", value0 / 1024, value);
+                        let check_result = evaluate(value, warn, crit);
+                        exit(
+                            check_result.set_info(status_msg)
+                            .set_perf_data(PerfData::from_metrics(metrics))
+                            .promote())
+                    } else {
+                        exit(
+                            CheckResult::from(3)
+                            .set_info(String::from("No performance data found."))
+                            .promote())
+                    }
                 } else {
                     exit(
                         CheckResult::from(3)
@@ -274,21 +280,27 @@ impl Checks {
                 if let Some(row) = rows.into_iter().nth(0) {
                     warn = warning.unwrap_or(80); 
                     crit = critical.unwrap_or(90); 
-                    let value0 = row.get::<u32, usize>(0);
-                    let value1 = row.get::<u32, usize>(1);
-                    let value: u32 = (value0 * 100 / value1).into();
-                    metrics.push(Metric::new(String::from("usage"), value0.to_string() + "MB"));
-                    metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
-                                .warning(warn.to_string() + "%")
-                                .critical(crit.to_string() + "%"));
-                    metrics.push(Metric::new(String::from("capacity"), value1.to_string() + "MB"));
+                    if let Ok(value0) = row.try_get::<u32, usize>(0) {
+                        let value1 = row.get::<u32, usize>(1);
+                        let value: u32 = (value0 * 100 / value1).into();
+                        metrics.push(Metric::new(String::from("usage"), value0.to_string() + "MB"));
+                        metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
+                                    .warning(warn.to_string() + "%")
+                                    .critical(crit.to_string() + "%"));
+                        metrics.push(Metric::new(String::from("capacity"), value1.to_string() + "MB"));
 
-                    status_msg = format!("Total memory usage is {}GB ({}%)", value0 / 1024, value);
-                    let check_result = evaluate(value, warn, crit);
-                    exit(
-                        check_result.set_info(status_msg)
-                        .set_perf_data(PerfData::from_metrics(metrics))
-                        .promote())
+                        status_msg = format!("Total memory usage is {}GB ({}%)", value0 / 1024, value);
+                        let check_result = evaluate(value, warn, crit);
+                        exit(
+                            check_result.set_info(status_msg)
+                            .set_perf_data(PerfData::from_metrics(metrics))
+                            .promote())
+                    } else {
+                        exit(
+                            CheckResult::from(3)
+                            .set_info(String::from("No performance data found."))
+                            .promote())
+                    }
                 } else {
                     exit(
                         CheckResult::from(3)
@@ -414,10 +426,14 @@ impl Checks {
                         }
                     }
 
-                    exit(
-                        check_result.set_info(output_string)
-                        .set_perf_data(PerfData::from_metrics(metrics))
-                        .promote())
+                    if output_string != String::from("") {
+                        check_result = check_result.set_info(output_string);
+                    }
+                    if metrics != Vec::new() {
+                        check_result = check_result.set_perf_data(PerfData::from_metrics(metrics));
+                    }
+
+                    exit(check_result.promote())
                 }
             },
         }
@@ -450,14 +466,6 @@ async fn main() -> Result<(), sqlx::Error> {
             }
 
             args.check.process_results(result_collection)?;
-/*            if let Ok(r) = result {
-                    args.check.process_results(r)?;
-            } else {
-                exit(
-                    CheckResult::from(1)
-                    .set_info(format!("Query returned no results"))
-                    .promote());
-            }*/
         },
         Err(e) => 
             exit(
