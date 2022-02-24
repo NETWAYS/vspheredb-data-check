@@ -405,6 +405,9 @@ impl Checks {
                     let mut check_result = CheckResult::from(0);
                     for row in rows {
                         let name: &str = row.get(0);
+                        if name.to_string().contains("ssd") {
+                            continue;
+                        }
                         let maintenance_mode: &str = row.get(1);
                         let capacity: u64 = row.get(2);
                         let free: u64 = row.get(3);
