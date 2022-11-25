@@ -282,7 +282,11 @@ impl Checks {
                     crit = critical.unwrap_or(90); 
                     if let Ok(value0) = row.try_get::<u32, usize>(0) {
                         let value1 = row.get::<u32, usize>(1);
-                        let value: u32 = (value0 * 100 / value1).into();
+                        let value: u32 = if let 0 = value1 {
+                            0
+                        } else {
+                            (value0 * 100 / value1).into()
+                        };
                         metrics.push(Metric::new(String::from("usage"), value0.to_string() + "MB"));
                         metrics.push(Metric::new(String::from("usage_percent"), value.to_string() + "%")
                                     .warning(warn.to_string() + "%")
@@ -383,7 +387,11 @@ impl Checks {
                         let capacity: u64 = row.get(2);
                         println!("Capacity");
                         let free: u64 = row.get(3);
-                        let used_percent: u32 = ((capacity - free) * 100 / capacity).try_into().unwrap();
+                        let used_percent: u32 = if let 0 = capacity {
+                            0
+                        } else {
+                            ((capacity - free) * 100 / capacity).try_into().unwrap()
+                        };
                         metrics.push(Metric::new(String::from("used"), used_percent.to_string())
                                      .warning(warn.to_string())
                                      .critical(crit.to_string()));
@@ -408,7 +416,11 @@ impl Checks {
                         let maintenance_mode: &str = row.get(1);
                         let capacity: u64 = row.get(2);
                         let free: u64 = row.get(3);
-                        let used_percent: u32 = ((capacity - free) * 100 / capacity).try_into().unwrap();
+                        let used_percent: u32 = if let 0 = capacity {
+                            0
+                        } else {
+                            ((capacity - free) * 100 / capacity).try_into().unwrap()
+                        };
                         metrics.push(Metric::new(format!("{}_used", name), used_percent.to_string())
                             .warning(warn.to_string())
                             .critical(crit.to_string()));
