@@ -19,7 +19,7 @@ Clone this repository and build the binary using `cargo`, Rust's packet manager:
 
 ```ShellSession
 $ apt-get update
-$ apt-get install rustc cargo
+$ apt-get install rustc cargo libssl-dev
 $ git clone https://github.com/NETWAYS/vspheredb-data-check
 $ cd vspheredb-data-check
 $ cargo build --release
@@ -29,7 +29,7 @@ $ cargo build --release
 
 ```ShellSession
 $ yum update
-$ yum install rustc cargo
+$ yum install rustc cargo openssl-devel
 $ git clone https://github.com/NETWAYS/vspheredb-data-check
 $ cd vspheredb-data-check
 $ cargo build --release
