@@ -14,7 +14,7 @@ edition = "2018"
 
 [dependencies]
 clap = { version = "3.0.14", features = [ "derive" ] }
-sqlx = { version = "0.5", features = [ "runtime-async-std-native-tls", "mysql" ] }
+sqlx = { version = "0.8.1", features = [ "runtime-async-std-native-tls", "mysql" ] }
 async-std = { version = "1", features = [ "attributes" ] }
 icingaplugin-rs = { git = "https://github.com/NETWAYS/icingaplugin-rs", tag="v0.0.1"}
 futures-lite = { version = "1.12.0" }
