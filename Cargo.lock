@@ -331,7 +331,7 @@ version = "0.2.3"
 dependencies = [
  "async-std",
  "clap",
- "futures-lite 1.13.0",
+ "futures-lite 2.3.0",
  "icingaplugin-rs",
  "sqlx",
 ]
