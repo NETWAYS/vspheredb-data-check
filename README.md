@@ -3,6 +3,10 @@
 
 # README
 
+> [!IMPORTANT]
+> This repository has been rewritten in Golang and is thus archived.
+> Please find the new version at [NETWAYS/check_vspheredb_data](https://github.com/NETWAYS/check_vspheredb_data).
+
 `check_vspheredb_data` is a check plugin for checking performance data gathered by the [Icingaweb2 vSphereDB module](https://github.com/icinga/icingaweb2-module-vspheredb)
 against given thresholds written in Rust.
 
